@@ -10,10 +10,10 @@ class Settings(BaseSettings):
     whisper_language: str = ""
 
     # Database
-    database_url: str = "postgresql://stt:stt@db:5432/stt"
+    database_url: str = "sqlite:///./stt.db"
 
     # Redis
-    redis_url: str = "redis://redis:6379/0"
+    redis_url: str = "redis://localhost:6379/0"
 
     # Upload
     max_upload_mb: int = 500
