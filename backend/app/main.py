@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.config import get_settings
 from app.models import init_db
-from app.routers import health, transcribe
+from app.routers import health, transcribe, voice_chat
 
 settings = get_settings()
 
@@ -16,9 +16,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Speech-to-Text API",
-    description="FastAPI backend for Speech-to-Text transcription",
-    version="1.0.0",
+    title="Voice AI Assistant API",
+    description="STT → LLM (Ollama) → TTS Pipeline",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -32,8 +32,13 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(transcribe.router)
+app.include_router(voice_chat.router)
 
 
 @app.get("/")
 async def root():
-    return {"message": "Speech-to-Text API", "docs": "/docs"}
+    return {
+        "message": "Voice AI Assistant API",
+        "docs": "/docs",
+        "features": ["STT", "LLM (Ollama)", "TTS"]
+    }

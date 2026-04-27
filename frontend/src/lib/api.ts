@@ -15,6 +15,19 @@ export interface TranscriptionJobStatus {
   full_text?: string
 }
 
+export interface VoiceChatResponse {
+  session_id: string
+  transcribed_text: string
+  response_text: string
+  audio_url: string
+}
+
+export interface ModelInfo {
+  stt: { model: string; device: string }
+  llm: { model: string; available: boolean; url: string }
+  tts: { model: string; sample_rate: number; languages: string[] }
+}
+
 export async function uploadAudioFile(file: File): Promise<{ job_id: string; filename: string }> {
   const formData = new FormData()
   formData.append('file', file)
@@ -50,5 +63,56 @@ export async function deleteJob(jobId: string): Promise<void> {
 
 export async function checkHealth(): Promise<{ status: string; model: string; device: string }> {
   const response = await fetch(`${API_BASE}/health`)
+  return response.json()
+}
+
+export async function voiceChat(
+  audioBlob: Blob,
+  sessionId?: string
+): Promise<VoiceChatResponse> {
+  const formData = new FormData()
+  formData.append('file', audioBlob, 'audio.webm')
+  if (sessionId) {
+    formData.append('session_id', sessionId)
+  }
+
+  const response = await fetch(`${API_BASE}/voice/chat`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Voice chat failed' }))
+    throw new Error(error.detail || 'Voice chat failed')
+  }
+
+  return response.json()
+}
+
+export async function synthesizeSpeech(
+  text: string,
+  language: string = 'en'
+): Promise<Blob> {
+  const response = await fetch(`${API_BASE}/voice/synthesize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, language }),
+  })
+
+  if (!response.ok) {
+    throw new Error('Speech synthesis failed')
+  }
+
+  return response.blob()
+}
+
+export async function clearVoiceSession(sessionId: string): Promise<void> {
+  await fetch(`${API_BASE}/voice/session/${sessionId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function getModelInfo(): Promise<ModelInfo> {
+  const response = await fetch(`${API_BASE}/voice/models`)
   return response.json()
 }

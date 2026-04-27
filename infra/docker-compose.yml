@@ -2,11 +2,14 @@ version: '3.9'
 
 x-api-env: &api_env
   environment:
-    - WHISPER_MODEL=medium
+    - WHISPER_MODEL=base
     - WHISPER_DEVICE=cpu
     - WHISPER_COMPUTE=int8
     - DATABASE_URL=postgresql://stt:stt@db:5432/stt
     - REDIS_URL=redis://redis:6379/0
+    - OLLAMA_URL=http://ollama:11434
+    - OLLAMA_MODEL=llama3.2:1b
+    - XTTS_MODEL=tts_models/en/xtts_v2
 
 services:
   nginx:
@@ -27,11 +30,18 @@ services:
     <<: *api_env
     volumes:
       - ./backend/uploads:/tmp/uploads
+      - ./backend/audio:/tmp/audio
     depends_on:
       - db
       - redis
+      - ollama
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   ws_server:
     build: ./backend
@@ -56,5 +66,31 @@ services:
     ports:
       - "5432:5432"
 
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    entrypoint: ["/entrypoint.sh"]
+    environment:
+      - PULL_MODEL=true
+      - OLLAMA_MODEL=llama3.2:1b
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+
 volumes:
   pgdata:
+  ollama_data:

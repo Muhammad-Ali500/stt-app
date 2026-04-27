@@ -1,292 +1,89 @@
-# Implementation Notes & Fixes
+# Voice AI Assistant - STT + LLM + TTS Pipeline
 
-This document details all the changes, fixes, and configurations made to get the STT application working in a non-Docker environment.
+## Overview
+Extended the STT app with a complete voice AI pipeline: Speech-to-Text → LLM (Ollama) → Text-to-Speech
 
----
+## Features
+- **Voice Chat**: Speak → AI responds with voice
+- **Conversation Memory**: Context-aware responses via Ollama
+- **TTS Response**: Coqui XTTS v2 for natural speech synthesis
 
-## Summary of Changes
+## Architecture
 
-1. **Environment Configuration** - Fixed .env parsing issues
-2. **Python Dependencies** - Fixed version compatibility
-3. **Frontend TypeScript** - Fixed compile errors  
-4. **CORS & SSL** - Configured nginx with Let's Encrypt
-5. **API Routing** - Fixed backend proxy issues
-6. **Live Transcription** - Implemented WebSocket audio streaming
-7. **Frontend UI** - Complete redesign
+```
+User Speaks → Whisper (STT) → Ollama (LLM) → Coqui XTTS (TTS) → User Listens
+```
 
----
+## Backend Changes
 
-## Detailed Fixes
+### New Files
+- `backend/app/services/ollama_service.py` - Ollama API client with streaming support
+- `backend/app/services/tts_service.py` - Coqui XTTS v2 integration
+- `backend/app/routers/voice_chat.py` - Voice pipeline API endpoints
 
-### 1. Environment Configuration
+### Modified Files
+- `backend/app/main.py` - Added voice_chat router
+- `backend/app/config.py` - Added Ollama and TTS settings
+- `backend/requirements.txt` - Added httpx, TTS, numpy, scipy
 
-**Problem:** Pydantic-settings failed to parse CORS_ORIGINS
+### API Endpoints
+- `POST /api/voice/chat` - Full voice pipeline
+- `POST /api/voice/synthesize` - TTS only
+- `GET /api/voice/audio/{file}` - Audio file retrieval
+- `GET /api/voice/models` - Model info
 
-**Original (.env):**
+## Frontend Changes
+
+### New Files
+- `frontend/src/components/VoiceChat/index.tsx` - Voice AI chat UI
+- `frontend/src/components/AudioPlayer/index.tsx` - Audio playback with waveform
+
+### Modified Files
+- `frontend/src/App.tsx` - Added Voice AI mode tab
+- `frontend/src/lib/api.ts` - Added voice API functions
+
+## Infrastructure
+
+### New Files
+- `infra/docker-compose.yml` - Added Ollama service
+- `infra/ollama-entrypoint.sh` - Model pull script
+- `frontend/Dockerfile` - Frontend build container
+
+### Modified Files
+- `backend/Dockerfile` - Added TTS dependencies
+- `infra/docker-compose.yml` - Added Ollama and audio volumes
+
+## Configuration
+
+### Environment Variables
 ```env
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+WHISPER_MODEL=base
+WHISPER_DEVICE=cpu
+OLLAMA_URL=http://ollama:11434
+OLLAMA_MODEL=llama3.2:1b
+XTTS_MODEL=tts_models/en/xtts_v2
 ```
 
-**Fixed (.env):**
-```env
-CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
-```
+## Usage
 
-**File:** `/root/sst/stt-app/backend/.env`
-
----
-
-### 2. Python Dependencies - silero-vad Version
-
-**Problem:** `silero-vad==0.0.6` not available on PyPI
-
-**Original (requirements.txt):**
-```txt
-silero-vad==0.0.6
-```
-
-**Fixed (requirements.txt):**
-```txt
-silero-vad==6.2.1
-```
-
-**File:** `/root/sst/stt-app/backend/requirements.txt`
-
----
-
-### 3. Frontend - TypeScript Errors
-
-**Problem:** Multiple TS6133 errors (declared but never read)
-
-**Fixed in FileUploader/index.tsx:**
-- Removed unused `TranscriptionSegment` interface
-- Removed unused `jobId` state  
-- Changed `isPolling` to `_isPollingLoading` (prefixed with _)
-
-**Fixed in LiveTranscriber/index.tsx:**
-- Removed unused import
-- Simplified component logic
-
-**Fixed in App.tsx:**
-- Removed unused `Waves` import
-
-**File:** `/root/sst/stt-app/frontend/src/components/FileUploader/index.tsx`
-**File:** `/root/sst/stt-app/frontend/src/components/LiveTranscriber/index.tsx`
-**File:** `/root/sst/stt-app/frontend/src/App.tsx`
-
----
-
-### 4. Database Configuration
-
-**Problem:** PostgreSQL container not available
-
-**Original (.env):**
-```env
-DATABASE_URL=postgresql://stt:stt@db:5432/stt
-```
-
-**Fixed (.env):**
-```env
-DATABASE_URL=sqlite:///./stt.db
-```
-
-**File:** `/root/sst/stt-app/backend/.env`
-
----
-
-### 5. Redis Configuration
-
-**Problem:** Redis was pointing to Docker container name
-
-**Original (.env):**
-```env
-REDIS_URL=redis://redis:6379/0
-```
-
-**Fixed (.env):**
-```env
-REDIS_URL=redis://localhost:6379/0
-```
-
-**File:** `/root/sst/stt-app/backend/.env`
-
----
-
-### 6. nginx Configuration with SSL
-
-**Problem:** Initial config didn't work with CloudFlare + Let's Encrypt
-
-**Final nginx config:**
-- HTTP to HTTPS redirect
-- SSL certificate paths from certbot
-- CORS headers for static assets
-- Proper proxy for /api/, /ws/, /health
-
-**File:** `/root/sst/stt-app/nginx/nginx.conf`
-
----
-
-### 7. API Proxy Routing
-
-**Problem:** /api/health returned 404 through nginx
-
-**Initial (broken) config:**
-```nginx
-location /api/ {
-    proxy_pass http://127.0.0.1:8000;
-}
-```
-
-**Issue:** nginx passes `/api/health` to backend as `/api/health`, but FastAPI expects `/health`
-
-**Working config:**
-```nginx
-location /api/ {
-    proxy_pass http://127.0.0.1:8000;
-    # Let nginx pass the full path - FastAPI has /api prefix
-}
-```
-
-**Note:** Our FastAPI router has `prefix="/api/transcribe"` so the full path works.
-
----
-
-### 8. CORS for Assets
-
-**Problem:** Assets加载失败，显示黑屏
-
-**Fixed nginx config - added CORS headers:**
-```nginx
-location ~* \.(js|css|png|jpg|jpeg|svg|woff|woff2)$ {
-    add_header Access-Control-Allow-Origin "*";
-    add_header Access-Control-Allow-Methods "GET, OPTIONS";
-    add_header Access-Control-Allow-Headers "Content-Type";
-}
-```
-
----
-
-### 9. Live Transcription - WebSocket Implementation
-
-**Problem:** Frontend was connecting to WebSocket but not sending audio data
-
-**Original LiveTranscriber:** Captured audio only for visualization (spectrum bars)
-
-**Fixed LiveTranscriber:** 
-- Added ScriptProcessorNode to capture audio chunks
-- Implemented sendAudioData function to send Int16Array to WebSocket
-- Proper binary data handling
-
-**Key code added:**
-```typescript
-const processor = audioContext.createScriptProcessor(4096, 1, 1)
-processor.onaudioprocess = (e) => {
-    const channelData = e.inputBuffer.getChannelData(0)
-    sendAudioData(channelData)
-}
-```
-
----
-
-## Services Running
-
-| Service | Port | Command |
-|--------|------|---------|
-| nginx | 80, 443 | `nginx -c /root/sst/stt-app/nginx/nginx.conf` |
-| FastAPI | 8000 | `/root/sst/stt-app/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000` |
-| whisper-live | 9090 | `/root/sst/stt-app/backend/venv/bin/python whisper_live.py --host 0.0.0.0 --port 9090` |
-| Redis | 6379 | (system service) |
-
----
-
-## Files Modified
-
-### Backend
-- `/root/sst/stt-app/backend/.env` - Environment configuration
-- `/root/sst/stt-app/backend/requirements.txt` - Python dependencies
-- `/root/sst/stt-app/backend/app/main.py` - FastAPI app
-- `/root/sst/stt-app/backend/app/config.py` - Settings
-- `/root/sst/stt-app/backend/app/routers/transcribe.py` - Upload endpoints
-- `/root/sst/stt-app/backend/app/routers/health.py` - Health check
-- `/root/sst/stt-app/backend/app/models.py` - SQLAlchemy models
-- `/root/sst/stt-app/backend/app/tasks.py` - Background tasks
-- `/root/sst/stt-app/backend/app/schemas.py` - Pydantic schemas
-- `/root/sst/stt-app/backend/app/services/whisper.py` - Whisper wrapper
-- `/root/sst/stt-app/backend/app/services/audio.py` - Audio conversion
-- `/root/sst/stt-app/backend/app/services/redis_service.py` - Redis operations
-- `/root/sst/stt-app/backend/whisper_live.py` - WebSocket server
-
-### Frontend
-- `/root/sst/stt-app/frontend/src/App.tsx` - Main app component
-- `/root/sst/stt-app/frontend/src/components/LiveTranscriber/index.tsx` - Live transcription
-- `/root/sst/stt-app/frontend/src/components/FileUploader/index.tsx` - File upload
-- `/root/sst/stt-app/frontend/src/lib/api.ts` - API client
-- `/root/sst/stt-app/frontend/src/lib/utils.ts` - Utilities
-- `/root/sst/stt-app/frontend/vite.config.ts` - Vite config
-
-### Infrastructure
-- `/root/sst/stt-app/nginx/nginx.conf` - nginx configuration
-- `/usr/share/nginx/html/index.html` - Built frontend
-- `/usr/share/nginx/html/assets/*` - Built frontend assets
-
----
-
-## SSL Certificate
-
-**Issuer:** Let's Encrypt
-**Domain:** stt.dev-in.com
-**Certificate:** `/etc/letsencrypt/live/stt.dev-in.com/`
-**Auto-renewal:** Enabled via certbot timer
-
----
-
-## Testing Commands
-
+### Docker Compose
 ```bash
-# Test health endpoint
-curl https://stt.dev-in.com/health
-
-# Test API endpoint
-curl -X POST https://stt.dev-in.com/api/transcribe/upload \
-  -F "file=@audio.mp3"
-
-# Test WebSocket (requires wscat)
-wscat -c wss://stt.dev-in.com/ws/
-
-# Check all services
-ss -tlnp | grep -E ":(80|443|8000|9090)"
-
-# Check nginx logs
-tail -f /var/log/nginx/access.log
-tail -f /var/log/nginx/error.log
-
-# Check backend logs
-tail -f /tmp/backend.log
-
-# Check whisper-live logs
-tail -f /tmp/whisper_live.log
+cd infra
+docker-compose up -d
 ```
 
----
+### Manual Testing
+```bash
+# Test voice chat
+curl -X POST -F "file=@audio.webm" http://localhost:8000/api/voice/chat
 
-## Performance Notes
+# Test TTS
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"text":"Hello, how can I help you?"}' \
+  http://localhost:8000/api/voice/synthesize
+```
 
-- **Whisper medium model:** ~1.5GB RAM, moderate CPU usage
-- **Expected latency:** <500ms for first word (live)
-- **File transcription:** ~3x audio duration for processing
-- **Redis:** Used for job status caching during file processing
-
----
-
-## Future Improvements
-
-1. Add authentication
-2. Add user management
-3. Support for more audio formats
-4. Add Prometheus/Grafana monitoring
-5. Switch to PostgreSQL for production
-6. Add Celery for heavy processing
-7. Support GPU acceleration
-8. Add more Whisper model sizes
-9. Improve WebSocket audio buffer handling
-10. Add auto-scaling for production
+## Models Used
+- **STT**: Faster-Whisper base (CPU optimized)
+- **LLM**: llama3.2:1b (~700MB, Ollama)
+- **TTS**: Coqui XTTS v2 (16 languages, voice cloning)
